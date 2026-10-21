@@ -1,0 +1,144 @@
+# Single source of truth for every tunable value (envs, agent, protocol, Gazebo glue).
+# Per-tier overrides live under `tiers:` and are merged over the top-level keys.
+
+experiment:
+  seeds: [0, 1, 2]            # used by plot.py / README loops; train.py takes one --seed
+  results_dir: ../results     # relative to src/
+  torch_threads: 1            # one thread per process so 3 seeds can run in parallel
+  checkpoint_every_eval: true # also write latest checkpoint + replay buffer at each eval
+
+control:
+  rate_hz: 10.0               # MUST be identical in both tiers (see README pitfalls)
+
+robot:                        # TurtleBot3 Burger
+  v_min: 0.0
+  v_max: 0.22
+  w_max: 2.84
+  lidar_offset_x: -0.032      # lidar sits 3.2 cm behind the base_footprint origin (odom frame)
+  max_linear_accel: 1.0       # m/s^2, matches the DiffDrive plugin in the Burger SDF
+
+actions:
+  mode: discrete              # discrete | continuous (continuous reserved for TD3 in phase 2)
+  discrete:
+    v: 0.15                   # constant forward speed, m/s
+    w: [1.5, 0.75, 0.0, -0.75, -1.5]   # hard left, left, forward, right, hard right (+w = CCW = left)
+
+lidar:
+  n_bins: 24                  # observation bins; each bin = min over a 15 deg sector of the 360-sample scan
+  n_samples: 360              # raw scan size (LDS-01); the fast tier emulates it
+  angle_min: 0.0
+  angle_max: 6.28             # same as the Burger SDF
+  range_min: 0.12
+  range_max: 3.5
+  noise_std: 0.01             # gaussian noise on raw ranges (fast tier; Gazebo has its own, same value)
+
+task:
+  goal_radius: 0.2
+  collision_dist: 0.13        # episode ends when min LiDAR bin < this
+  max_steps: 500
+
+reward:
+  goal: 100.0
+  collision: -100.0
+  progress_weight: 50.0       # r += w * (prev_dist - dist): potential-based, so circling nets zero.
+                              # Tuned from 10 -> 50 (see README "Hyperparameter tuning")
+  step_penalty: 0.05          # subtracted every step
+  timeout_penalty: 0.0
+
+arena:
+  size: 4.0                   # square side (m); walls' inner faces at +-size/2 (also used by the Gazebo world)
+  wall_thickness: 0.1
+  start_wall_margin: 0.35     # start centre >= this from walls
+  goal_wall_margin: 0.40
+  start_goal_min_dist: 1.0
+  goal_max_dist: 3.0          # keeps the goal reachable within max_steps at 0.15 m/s
+  start_obstacle_clearance: 0.30   # clearance to obstacle surfaces
+  goal_obstacle_clearance: 0.40
+  obstacle_wall_margin: 0.5
+  obstacle_gap: 0.40          # min gap between obstacle surfaces (robot is ~0.14 m wide)
+
+obstacles:                    # slot i is a cylinder if i is even, else a box (same pool in Gazebo)
+  min_count: 3
+  max_count: 6
+  cylinder_radius: 0.15
+  box_size: 0.30
+
+observation:
+  dist_norm: 5.66             # goal distance divided by the arena diagonal (4*sqrt(2))
+  lidar_clip: 3.5             # LiDAR bins are min(range, lidar_clip) / lidar_clip (3.5 = full sensor range)
+
+dqn:
+  hidden: [256, 256]
+  lr: 5.0e-4                  # within the allowed 1e-4 .. 1e-3
+  gamma: 0.99
+  batch_size: 128
+  buffer_size: 100000
+  target_update_every: 1000   # hard copy, in env steps
+  train_freq: 1               # gradient steps per env step
+  grad_clip: 10.0             # global grad-norm clip
+  loss: huber                 # huber | mse
+  reward_scale: 1.0           # TD-target reward multiplier (see README "tuning")
+  eps_start: 1.0
+  eps_end: 0.05
+  # eps_decay_steps / warmup_steps / total_steps come from `tiers:`
+
+eval:
+  interval: 5000
+  episodes: 50
+  n_layouts: 50               # episode i uses fixed layout i
+  # Two disjoint layout sets (README section 6, "evaluation protocol"):
+  tuning_layout_seed: 12345   # periodic evals + every selection decision (progress_weight was tuned on these)
+  report_layout_seed: 987654  # held out: never used for a decision; final numbers only
+  report_n_layouts: 200
+  report_episodes: 200        # 200 episodes -> s.e. of a success rate <= 3.5 points
+
+tiers:
+  fast:
+    total_steps: 200000
+    eps_decay_steps: 100000
+    warmup_steps: 5000
+    sim_substeps: 5           # physics sub-steps per control step
+    action_noise_std: 0.0     # optional gaussian noise on commanded v / w
+    # Actuation fidelity (README sections 5 and 6, "transfer gap"). 0 = original instant actuation.
+    act_delay_s: 0.0          # pure command delay: the previous (v, w) stays active this long into each period
+    act_delay_jitter_s: 0.0   # domain randomisation: per-episode delay ~ U(act_delay_s -+ this)
+    act_lag_tau_s: 0.0        # first-order lag time constant on w (0 = none)
+  gz:
+    total_steps: 30000
+    eps_decay_steps: 15000
+    warmup_steps: 1000
+
+smoke:                        # --smoke overrides
+  total_steps: 2000
+  warmup_steps: 500
+  eps_decay_steps: 1000
+  eval_interval: 1000
+  eval_episodes: 5
+  target_update_every: 200
+
+gz:                           # Gazebo tier glue
+  world_name: tb3_dqn
+  robot_name: burger
+  cmd_vel_type: TwistStamped  # Jazzy TurtleBot3 bridge default; set to Twist if you change the bridge yaml
+  cmd_vel_topic: /cmd_vel
+  scan_topic: /scan
+  odom_topic: /odom           # wheel odometry from the DiffDrive plugin (drifts: README section 6)
+  gt_odom_topic: /odom_gt     # ground-truth pose (gz OdometryPublisher on the physics pose), bridged like /odom
+  pose_topic: /odom_gt        # which of the two the env uses for its pose (goal distance/heading + success test).
+                              # /odom_gt matches the fast tier (true pose); /odom = what a robot without localisation sees
+  lidar_rate_hz: 10.0         # patched into the Burger model so there is one scan per control step
+  real_time_factor: 1.0       # target RTF of the (free-running) sim; 0 = unthrottled
+  max_step_size: 0.001        # physics step (s)
+  dart_collision_detector: bullet   # DART collision detector. "" = engine default (fcl). With fcl (and ode) the Burger
+                                    # loses wheel traction after hard turns and keeps spinning ~1-2 s while wheel
+                                    # odometry reports a stop (README section 6, transfer gap). bullet fixes it.
+  lockstep: false             # true: pause the sim and advance exactly one control period per env step
+                              # (deterministic dt, runs as fast as the machine allows; see README)
+  cmd_settle_s: 0.02          # lockstep only: wall-clock wait for /cmd_vel to reach gz before stepping
+  step_timeout_s: 5.0         # wall-clock wait for a fresh scan before declaring the sim dead
+  reset_settle_steps: 3       # scans to wait after teleporting before the first observation
+  park_xy: [30.0, 30.0]       # unused obstacle slots are parked here (spacing added per slot)
+  fix_base_footprint_inertia: true   # stock Burger SDF bug: empty base_footprint link gets 1 kg / 1 kg m^2 by default,
+                                     # so the robot keeps spinning after hard turns (README section 6). false = stock
+  marker_z: 0.02
+  generated_dir: ../gz_generated  # world / bridge yaml / patched model written here

@@ -1,0 +1,15 @@
+
+# Python / environments
+venv/
+__pycache__/
+*.pyc
+
+# Generated
+gz_generated*/
+results/logs/
+*.pt
+*.npz
+*.pids
+*.lock
+*.log
+results/**/ckpt*

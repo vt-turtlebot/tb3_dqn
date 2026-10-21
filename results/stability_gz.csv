@@ -1,0 +1,4 @@
+run,evals,dips,dip_steps,max_drop,best_success,best_step,final_success,best_minus_final,last4_mean
+gz_dqn_seed0,7,0,,8.0,72.0,15000,64.0,8.0,69.0
+gz_dqn_seed1,7,0,,0.0,76.0,30000,76.0,0.0,67.0
+gz_dqn_seed2,7,0,,4.0,68.0,25000,68.0,0.0,62.5

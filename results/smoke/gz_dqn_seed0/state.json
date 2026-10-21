@@ -1,0 +1,1 @@
+{"steps": 2000, "episodes": 20, "train_env_rng": {"bit_generator": "PCG64", "state": {"state": 48699472183110917515660518249855531243, "inc": 87136372517582989555478159403783844777}, "has_uint32": 1, "uinteger": 1994477189}}

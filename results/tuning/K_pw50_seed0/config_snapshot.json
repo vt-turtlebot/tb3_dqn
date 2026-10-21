@@ -1,0 +1,153 @@
+{
+  "experiment": {
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "results_dir": "../results",
+    "torch_threads": 1,
+    "checkpoint_every_eval": true
+  },
+  "control": {
+    "rate_hz": 10.0
+  },
+  "robot": {
+    "v_min": 0.0,
+    "v_max": 0.22,
+    "w_max": 2.84,
+    "lidar_offset_x": -0.032,
+    "max_linear_accel": 1.0
+  },
+  "actions": {
+    "mode": "discrete",
+    "discrete": {
+      "v": 0.15,
+      "w": [
+        1.5,
+        0.75,
+        0.0,
+        -0.75,
+        -1.5
+      ]
+    }
+  },
+  "lidar": {
+    "n_bins": 24,
+    "n_samples": 360,
+    "angle_min": 0.0,
+    "angle_max": 6.28,
+    "range_min": 0.12,
+    "range_max": 3.5,
+    "noise_std": 0.01
+  },
+  "task": {
+    "goal_radius": 0.2,
+    "collision_dist": 0.13,
+    "max_steps": 500
+  },
+  "reward": {
+    "goal": 100.0,
+    "collision": -100.0,
+    "progress_weight": 50,
+    "step_penalty": 0.05,
+    "timeout_penalty": 0.0
+  },
+  "arena": {
+    "size": 4.0,
+    "wall_thickness": 0.1,
+    "start_wall_margin": 0.35,
+    "goal_wall_margin": 0.4,
+    "start_goal_min_dist": 1.0,
+    "goal_max_dist": 3.0,
+    "start_obstacle_clearance": 0.3,
+    "goal_obstacle_clearance": 0.4,
+    "obstacle_wall_margin": 0.5,
+    "obstacle_gap": 0.4
+  },
+  "obstacles": {
+    "min_count": 3,
+    "max_count": 6,
+    "cylinder_radius": 0.15,
+    "box_size": 0.3
+  },
+  "observation": {
+    "dist_norm": 5.66,
+    "lidar_clip": 3.5
+  },
+  "dqn": {
+    "hidden": [
+      256,
+      256
+    ],
+    "lr": 0.0005,
+    "gamma": 0.99,
+    "batch_size": 128,
+    "buffer_size": 100000,
+    "target_update_every": 1000,
+    "train_freq": 1,
+    "grad_clip": 10.0,
+    "loss": "huber",
+    "reward_scale": 1.0,
+    "eps_start": 1.0,
+    "eps_end": 0.05
+  },
+  "eval": {
+    "interval": 5000,
+    "episodes": 50,
+    "n_layouts": 50,
+    "layout_seed": 12345
+  },
+  "tiers": {
+    "fast": {
+      "total_steps": 200000,
+      "eps_decay_steps": 100000,
+      "warmup_steps": 5000,
+      "sim_substeps": 5,
+      "action_noise_std": 0.0
+    },
+    "gz": {
+      "total_steps": 30000,
+      "eps_decay_steps": 15000,
+      "warmup_steps": 1000
+    }
+  },
+  "smoke": {
+    "total_steps": 2000,
+    "warmup_steps": 500,
+    "eps_decay_steps": 1000,
+    "eval_interval": 1000,
+    "eval_episodes": 5,
+    "target_update_every": 200
+  },
+  "gz": {
+    "world_name": "tb3_dqn",
+    "robot_name": "burger",
+    "cmd_vel_type": "TwistStamped",
+    "cmd_vel_topic": "/cmd_vel",
+    "scan_topic": "/scan",
+    "odom_topic": "/odom",
+    "lidar_rate_hz": 10.0,
+    "real_time_factor": 1.0,
+    "max_step_size": 0.001,
+    "lockstep": false,
+    "cmd_settle_s": 0.02,
+    "step_timeout_s": 5.0,
+    "reset_settle_steps": 3,
+    "park_xy": [
+      30.0,
+      30.0
+    ],
+    "marker_z": 0.02,
+    "generated_dir": "../gz_generated"
+  },
+  "tier": "fast",
+  "run": {
+    "total_steps": 100000,
+    "eps_decay_steps": 50000,
+    "warmup_steps": 5000,
+    "sim_substeps": 5,
+    "action_noise_std": 0.0
+  },
+  "smoke_mode": false
+}

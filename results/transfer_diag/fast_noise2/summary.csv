@@ -1,0 +1,4 @@
+run,eval_env,layouts,episodes,success_rate,collision_rate,timeout_rate,mean_return,mean_steps_to_goal,mean_abs_dw
+fast_dqn_seed0,fast,tuning,50,0.8,0.2,0.0,131.42236504270403,120.6,1.4219800797212685
+fast_dqn_seed1,fast,tuning,50,0.84,0.16,0.0,141.66910525795373,123.47619047619048,0.3315606199549814
+fast_dqn_seed2,fast,tuning,50,0.8,0.2,0.0,132.4982534080593,124.7,0.8470865753595426

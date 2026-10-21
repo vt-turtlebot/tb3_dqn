@@ -1,0 +1,6 @@
+run,layout,src,env,src_outcome,replay_outcome,steps,src_steps,final_dxy_vs_src,max_dxy_vs_src
+fast_dqn_seed0,10,gz_gt,fast,collision,collision,32,48,0.0362540309226835,0.0362540309226835
+fast_dqn_seed0,12,gz_gt,fast,collision,sequence_end,79,79,0.5673728689686623,0.5673728689686623
+fast_dqn_seed1,0,gz_gt,fast,collision,collision,56,73,0.1268196377158954,0.1268196377158954
+fast_dqn_seed1,6,gz_gt,fast,collision,sequence_end,18,18,0.0891706255983973,0.0891706255983973
+fast_dqn_seed2,12,gz_gt,fast,collision,collision,73,82,0.08037921978427676,0.08037921978427676
