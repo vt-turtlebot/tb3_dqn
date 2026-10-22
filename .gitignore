@@ -13,3 +13,5 @@ results/logs/
 *.lock
 *.log
 results/**/ckpt*
+
+CLAUDE.md
