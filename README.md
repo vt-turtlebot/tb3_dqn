@@ -488,7 +488,7 @@ tb3_dqn/
 └── src/
     ├── config.yaml               every tunable value
     ├── envs/  common.py layout.py env_fast.py env_gz.py gz_world.py
-    ├── agents/ base.py dqn.py
+    ├── agents/ base.py dqn.py td3.py
     ├── train.py  evaluate.py  plot.py  run_final.sh
     ├── start_gz.sh  validate_gz.py
     ├── diagnose_transfer.py  diag_dynamics.py     transfer-gap diagnosis (§6)
@@ -497,9 +497,58 @@ tb3_dqn/
 
 ### Extending to TD3 (phase 2)
 
-Set `actions.mode: continuous` (the env already exposes `Box([v_min, −w_max], [v_max, w_max])` and decodes it), add
-`agents/td3.py` implementing `act / observe / update / save / load`, and register it in `agents/__init__.py`. Training,
-evaluation, CSV logging and every plot are agent-independent (`info()` may return no ε; plots then simply omit it).
-Note that `train.py` currently restricts `--agent` to `dqn`, and DQN's replay buffer stores integer actions — the TD3 agent
-brings its own buffer. `train.py` logs whatever `update()` returns (`upd_*` columns), and the Q-overestimation probe in
-`evaluate.py` is used only by agents that expose `q_values` and `gamma`, so a TD3 agent needs no changes there either.
+TD3 is in `agents/td3.py`; see [Phase 2: TD3](#phase-2-td3-continuous-actions) for how to run it. Any further agent
+follows the same pattern: a module implementing `act / observe / update / save / load` (`agents/base.py`), a config
+section, an entry in `agents/__init__.py` (`make_agent` and `ACTION_MODE`), and the name in the `--agent` choices of
+`train.py` / `evaluate.py` / `plot.py`. Training, evaluation, CSV logging and the plots need nothing else.
+
+## Phase 2: TD3 (continuous actions)
+
+**Agent (`agents/td3.py`)** — vanilla TD3 (Fujimoto et al. 2018): twin critics with the clipped double-Q target, target
+policy smoothing (σ 0.2, clip 0.5) and delayed actor/target updates (every 2nd critic update, Polyak τ 0.005). No other
+extras. The actor outputs `tanh` actions in [−1, 1]² that are mapped to the full Burger range, v ∈ [0, 0.22] m/s and
+w ∈ [−2.84, 2.84] rad/s (`Box([v_min, −w_max], [v_max, w_max])`, decoded and clipped by `envs/common.py` as before).
+So, unlike DQN (constant v = 0.15, five w values), TD3 also chooses its speed. Exploration: uniform random actions for the
+warm-up (5k steps fast, 1k Gazebo), then Gaussian noise σ 0.1 in normalised units.
+
+* Shared with DQN for the comparison: observation, reward, termination, 2×256 ReLU networks, γ 0.99, batch 128, replay 100k,
+  one gradient step per env step, 200k (fast) / 30k (Gazebo) steps, same warm-up, same tuning/report layouts and protocol.
+  TD3-specific values (Adam 3e-4 for actor and critics, MSE critic loss, no gradient clipping) are the TD3-paper defaults
+  and are **untuned**; any tuning must be judged on the tuning layouts only (§5.1).
+* `done` is goal/collision only, exactly as for DQN; a 500-step truncation bootstraps.
+* `train.py` / `evaluate.py` set `actions.mode` from `--agent` (dqn → discrete, td3 → continuous), so one `config.yaml`
+  serves both. The DQN code path is unchanged.
+* Reproducibility: all TD3 randomness (warm-up actions, exploration noise, replay indices, smoothing noise) comes from one
+  NumPy generator stored in the checkpoint with the torch RNG state, both optimisers and all four networks, so fast-tier TD3
+  runs are bit-identical across repeats and resumes, like DQN.
+* Logging: `update()` returns the critic loss, `q_max_mean` = Q1(s, π(s)) (the continuous analogue of DQN's max-Q),
+  target mean, critic grad norm and the actor loss, so `q_stability_td3.png` and the Q(s₀)-vs-realised-return
+  overestimation probe (`q_values` + `gamma`) work unchanged. There is no ε (the ε columns are NaN; the plots omit them).
+
+```bash
+# from src/, venv active
+python train.py --agent td3 --env fast --seed 0 --smoke         # ~2k steps, quick end-to-end check
+python train.py --agent td3 --env fast --seed 0                 # 200k steps -> results/runs/fast_td3_seed0/
+python train.py --agent td3 --env gz --seed 0 --smoke           # Gazebo smoke test (needs ./start_gz.sh running)
+python evaluate.py --agent td3 --checkpoint ../results/runs/fast_td3_seed0/final.pt --env fast
+python evaluate.py --agent td3 --checkpoint ../results/runs/fast_td3_seed0/final.pt --env gz   # fast -> gz transfer
+python evaluate.py --agent td3 --random --env fast              # random baseline in the continuous box (random_td3)
+python plot.py --agent td3                                      # *_td3.png, summary_td3.csv, stability_td3.csv
+
+# final protocol, same as DQN (§6): run names, the random baseline and plot names follow AGENT
+AGENT=td3 ./run_final.sh train
+AGENT=td3 ./run_final.sh report-fast
+AGENT=td3 ./run_final.sh report-gz
+AGENT=td3 ./run_final.sh plots
+```
+
+* `--agent` must match the checkpoint for `evaluate.py` (a TD3 checkpoint is rejected by the DQN loader and vice versa).
+* Tuning runs: `--tag` names do not include the agent, so put it in the tag (`--tag td3_lr1e-4`) to keep DQN and TD3
+  sweeps apart in `results/tuning/`.
+* Provenance: adding the `td3:` section changes `config_sha256` in `env_info.json` for new DQN runs too (the hash covers the
+  whole resolved config). DQN behaviour is unchanged: a DQN run with this code is bit-identical to one with the phase-1 code.
+* `diagnose_transfer.py`, `validate_gz.py` and `diag_dynamics.py` are still DQN/discrete-only.
+* Expect the policy to use the extremes of w more than DQN's ±1.5 rad/s (tanh actors tend to saturate), which matters for
+  Gazebo transfer and the real robot (§4, §6); compare `mean_abs_dw`, and note that `mean_steps_to_goal` is not directly
+  comparable (TD3 may drive at up to 0.22 m/s against DQN's fixed 0.15). Watch `timeout_rate` for a policy that learns to
+  stop (v_min = 0).

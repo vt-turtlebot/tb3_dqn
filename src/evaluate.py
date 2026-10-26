@@ -3,6 +3,8 @@
     python evaluate.py --checkpoint ../results/runs/fast_dqn_seed0/final.pt --env gz
     python evaluate.py --checkpoint <ckpt> [<ckpt> ...] --env fast
     python evaluate.py --random --env fast          # random-policy baseline
+    python evaluate.py --checkpoint ../results/runs/fast_td3_seed0/final.pt --agent td3 --env fast
+    python evaluate.py --random --agent td3 --env fast    # random baseline in the continuous action space
     python evaluate.py --checkpoint <ckpt> --env fast --layouts report        # held-out layouts (final numbers)
     python evaluate.py --checkpoint <ckpt> --env gz --record-steps --out-dir ../results/transfer_diag
 """
@@ -17,7 +19,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from agents import make_agent
+from agents import make_agent, set_action_mode
 from agents.base import Agent
 from envs import make_env
 from envs.common import TB3BaseEnv
@@ -100,7 +102,8 @@ def main() -> None:
     p.add_argument("--random", action="store_true", help="evaluate a uniform-random policy instead")
     p.add_argument("--oracle", action="store_true", help="evaluate the heading-only oracle (ignores the LiDAR) instead")
     p.add_argument("--env", choices=["fast", "gz"], default="fast")
-    p.add_argument("--agent", default="dqn")
+    p.add_argument("--agent", default="dqn", choices=["dqn", "td3"],
+                   help="agent type of the checkpoints; also sets the action space of --random")
     p.add_argument("--episodes", type=int, default=None, help="default: eval.episodes from config")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--config", default=None)
@@ -116,6 +119,7 @@ def main() -> None:
         p.error("give --checkpoint, --random or --oracle")
 
     cfg = load_config(args.config, tier=args.env)
+    set_action_mode(cfg, "oracle" if args.oracle else args.agent)
     apply_overrides(cfg, args.overrides)
     torch.set_num_threads(int(cfg["experiment"]["torch_threads"]))
     n_eps = args.episodes or cfg["eval"]["episodes" if args.layouts == "tuning" else "report_episodes"]
