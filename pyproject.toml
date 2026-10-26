@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tb3sim"
+version = "0.1.0"
+description = "Pure-Python 2D TurtleBot3 Burger sim (Gymnasium) with 24-bin LiDAR"
+requires-python = ">=3.10"
+dependencies = ["numpy", "gymnasium", "pyyaml"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["tb3sim", "envs"]
+py-modules = ["utils"]
