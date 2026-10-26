@@ -3,12 +3,14 @@
     python plot.py                       # fast tier (default)
     python plot.py --env gz              # the Gazebo validation runs
     python plot.py --layout 3            # which fixed layout the trajectory overlay uses
+    python plot.py --agent td3           # TD3 runs (results/runs/<env>_td3_seed*)
 
 Reads  results/runs/<env>_<agent>_seed*/{eval.csv,train_episodes.csv,final_eval_traj.npz}
        results/transfer_diag/gz_gt/*_traj.npz: fast-trained policies in Gazebo (trajectory overlay)  [optional]
        results/report/summary.csv: held-out report-layout evaluations (evaluate.py --layouts report)  [optional;
        when present the bar chart and the summary use it instead of the last periodic eval]
-Writes results/*.png, results/summary.csv and results/stability.csv. For --env gz the names get a `_gz` suffix.
+Writes results/*.png, results/summary.csv and results/stability.csv. For --env gz the names get a `_gz` suffix, and for
+an agent other than dqn an `_<agent>` suffix (so the DQN files are never overwritten).
 Learning curves always come from the periodic evaluations, which run on the *tuning* layouts.
 """
 from __future__ import annotations
@@ -57,18 +59,19 @@ def load_runs(res: Path, env: str, agent: str) -> dict[str, dict[str, pd.DataFra
     return runs
 
 
-def random_baseline(res: Path, env: str) -> float | None:
+def random_baseline(res: Path, env: str, agent: str = "dqn") -> float | None:
     """Random-policy success on the held-out report layouts (the curves use the tuning layouts; the two random rates
-    differ by ~1-2 points)."""
+    differ by ~1-2 points). The random policy acts in the same action space as `agent` (random_<agent>)."""
     f = res / "report" / "summary.csv"
     if not f.exists():
         return None
     df = pd.read_csv(f)
-    row = df[(df["run"] == "random_dqn") & (df["eval_env"] == env)]
+    row = df[(df["run"] == f"random_{agent}") & (df["eval_env"] == env)]
     return float(row["success_rate"].iloc[0]) * 100 if len(row) else None
 
 
-def fig_success(runs: dict, env: str, x: str, out: Path, baseline: float | None, suffix: str) -> None:
+def fig_success(runs: dict, env: str, x: str, out: Path, baseline: float | None, suffix: str,
+                agent: str = "dqn") -> None:
     fig, ax = plt.subplots(figsize=(7.5, 4.6))
     evs = [r["eval"] for r in runs.values()]
     if x == "step":
@@ -83,7 +86,7 @@ def fig_success(runs: dict, env: str, x: str, out: Path, baseline: float | None,
     for y in Y:
         ax.plot(grid, y, color=C["mean"], alpha=0.18, lw=0.9)
     m, h = Y.mean(0), ci95(Y)
-    ax.plot(grid, m, color=C["mean"], lw=2.2, label=f"DQN mean over {len(evs)} seeds")
+    ax.plot(grid, m, color=C["mean"], lw=2.2, label=f"{agent.upper()} mean over {len(evs)} seeds")
     ax.fill_between(grid, np.clip(m - h, 0, 100), np.clip(m + h, 0, 100), color=C["mean"], alpha=0.25, label="95% CI")
     if baseline is not None:
         ax.axhline(baseline, color=C["random"], ls="--", lw=1.3, label=f"random policy ({baseline:.0f}%, held-out layouts)")
@@ -128,7 +131,7 @@ def fig_bars(runs: dict, env: str, res: Path, out: Path, suffix: str, agent: str
     summ = res / "transfer" / "summary.csv"
     if env == "fast" and summ.exists():
         df = pd.read_csv(summ)
-        t = df[(df["eval_env"] == "gz") & df["run"].str.startswith("fast_dqn")]
+        t = df[(df["eval_env"] == "gz") & df["run"].str.startswith(f"fast_{agent}")]
         if len(t):
             series.append(("fast-trained, evaluated in Gazebo", t[[c[0] for c in cats]].to_numpy() * 100))
     _bars(series, cats, out / f"success_vs_collisions_bar{suffix}.png",
@@ -204,9 +207,11 @@ def fig_success_per_seed(runs: dict, env: str, out: Path, suffix: str, warmup: i
     plt.close(fig)
 
 
-def fig_q_stability(runs: dict, env: str, out: Path, suffix: str) -> None:
+def fig_q_stability(runs: dict, env: str, out: Path, suffix: str, agent: str = "dqn") -> None:
     """TD loss, mean max-Q, gradient norm (training batches) and the eval overestimation probe, per seed."""
-    panels = [("upd_loss_mean", "TD loss (Huber), interval mean"), ("upd_q_max_mean_mean", "mean max_a Q(s,a), batches"),
+    q_label = "mean Q1(s, pi(s)), batches" if agent == "td3" else "mean max_a Q(s,a), batches"
+    loss_label = "critic loss (Q1 + Q2), interval mean" if agent == "td3" else "TD loss (Huber), interval mean"
+    panels = [("upd_loss_mean", loss_label), ("upd_q_max_mean_mean", q_label),
               ("upd_grad_norm_mean", "grad norm before clip, interval mean"), ("q0_minus_G", "Q(s0) - realised disc. return (eval)")]
     have = [r for r in runs.values() if "upd_loss_mean" in r["eval"]]
     if not have:
@@ -231,7 +236,7 @@ def fig_q_stability(runs: dict, env: str, out: Path, suffix: str) -> None:
     for ax in axes[1]:
         ax.set_xlabel("Training steps")
     axes[0, 0].legend(fontsize=7, ncol=2)
-    fig.suptitle(f"Q-learning stability diagnostics ({env} tier; logging only, vanilla DQN)")
+    fig.suptitle(f"Q-learning stability diagnostics ({env} tier; logging only, vanilla {agent.upper()})")
     fig.tight_layout()
     fig.savefig(out / f"q_stability{suffix}.png", dpi=140)
     plt.close(fig)
@@ -262,8 +267,11 @@ def fig_return(runs: dict, env: str, out: Path, bin_w: int, suffix: str) -> None
     ax.grid(alpha=0.3)
     ax2 = ax.twinx()
     eps = pd.concat([r["eval"].set_index("step")["epsilon"] for r in runs.values()], axis=1).mean(axis=1)
-    ax2.plot(eps.index, eps.values, color=C["eps"], lw=1.6, ls="--", label="epsilon")
-    ax2.set(ylabel="epsilon", ylim=(0, 1.05))
+    if eps.notna().any():                 # agents without epsilon (TD3) log NaN: no exploration-schedule axis
+        ax2.plot(eps.index, eps.values, color=C["eps"], lw=1.6, ls="--", label="epsilon")
+        ax2.set(ylabel="epsilon", ylim=(0, 1.05))
+    else:
+        ax2.set_axis_off()
     l1, n1 = ax.get_legend_handles_labels()
     l2, n2 = ax2.get_legend_handles_labels()
     ax.legend(l1 + l2, n1 + n2, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, frameon=False)
@@ -272,7 +280,7 @@ def fig_return(runs: dict, env: str, out: Path, bin_w: int, suffix: str) -> None
     plt.close(fig)
 
 
-def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix: str) -> None:
+def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix: str, agent: str = "dqn") -> None:
     layout = eval_layouts(cfg)[layout_idx]
     half, oc = cfg["arena"]["size"] / 2.0, cfg["obstacles"]
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -286,11 +294,11 @@ def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix:
                                    transform=matplotlib.transforms.Affine2D().rotate(o.yaw).translate(o.x, o.y) + ax.transData))
     ax.add_patch(Circle(layout.goal, cfg["task"]["goal_radius"], fc="#2ca02c", alpha=0.5, ec="g", label="goal"))
     ax.plot(*layout.start[:2], "ks", label="start")
-    sources = [(env, C[env], "-", sorted(glob.glob(str(res / "runs" / f"{env}_dqn_seed*" / "final_eval_traj.npz"))))]
+    sources = [(env, C[env], "-", sorted(glob.glob(str(res / "runs" / f"{env}_{agent}_seed*" / "final_eval_traj.npz"))))]
     if env == "fast":
         # fast-trained policies in the final Gazebo tier, same tuning layouts (transfer-gap recordings, §6)
         sources.append(("gz (transfer)", C["gz"], "--",
-                        sorted(glob.glob(str(res / "transfer_diag" / "gz_gt" / "fast_dqn_seed*__on_gz_traj.npz")))))
+                        sorted(glob.glob(str(res / "transfer_diag" / "gz_gt" / f"fast_{agent}_seed*__on_gz_traj.npz")))))
     drawn = False
     for name, colour, ls, files in sources:
         for k, f in enumerate(files):
@@ -313,7 +321,7 @@ def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--env", default="fast", choices=["fast", "gz"])
-    p.add_argument("--agent", default="dqn")
+    p.add_argument("--agent", default="dqn", choices=["dqn", "td3"])
     p.add_argument("--layout", type=int, default=0, help="fixed layout index for the trajectory overlay")
     p.add_argument("--return-bin", type=int, default=5000, help="step bin width for the training-return curve")
     p.add_argument("--config", default=None)
@@ -321,18 +329,18 @@ def main() -> None:
 
     cfg = load_config(args.config, tier=args.env)
     res = results_dir(cfg)
-    suffix = "" if args.env == "fast" else f"_{args.env}"
+    suffix = ("" if args.env == "fast" else f"_{args.env}") + ("" if args.agent == "dqn" else f"_{args.agent}")
     runs = load_runs(res, args.env, args.agent)
-    base = random_baseline(res, args.env)
+    base = random_baseline(res, args.env, args.agent)
 
-    fig_success(runs, args.env, "step", res, base, suffix)
-    fig_success(runs, args.env, "episodes", res, base, suffix)
+    fig_success(runs, args.env, "step", res, base, suffix, args.agent)
+    fig_success(runs, args.env, "episodes", res, base, suffix, args.agent)
     fig_bars(runs, args.env, res, res, suffix, args.agent)
     fig_return(runs, args.env, res, args.return_bin, suffix)
-    fig_traj(args.env, res, res, args.layout, cfg, suffix)
+    fig_traj(args.env, res, res, args.layout, cfg, suffix, args.agent)
     warmup = int(cfg["run"]["warmup_steps"])
     fig_success_per_seed(runs, args.env, res, suffix, warmup)
-    fig_q_stability(runs, args.env, res, suffix)
+    fig_q_stability(runs, args.env, res, suffix, args.agent)
     stab = stability_table(runs, warmup)
     stab.to_csv(res / f"stability{suffix}.csv", index=False)
 
@@ -347,7 +355,7 @@ def main() -> None:
                          **{f"{k}_ci95": float(ci95(rep_gz[[k]].to_numpy())[0]) for k in keys}})
         summ = res / "report" / "summary.csv"
         df = pd.read_csv(summ)
-        for name, sub in {"random policy": df[(df["run"] == "random_dqn") & (df["eval_env"] == args.env)]}.items():
+        for name, sub in {"random policy": df[(df["run"] == f"random_{args.agent}") & (df["eval_env"] == args.env)]}.items():
             if len(sub):
                 rows.append({"label": f"{name} (report)", **sub[keys].mean().to_dict()})
         pd.DataFrame(rows).to_csv(res / f"summary{suffix}.csv", index=False)
@@ -362,8 +370,8 @@ def main() -> None:
     summ = res / "transfer" / "summary.csv"
     if summ.exists():
         df = pd.read_csv(summ)
-        extra = {"random policy": df[(df["run"] == "random_dqn") & (df["eval_env"] == args.env)],
-                 "fast-trained -> gz": df[(df["eval_env"] == "gz") & df["run"].str.startswith("fast_dqn")]
+        extra = {"random policy": df[(df["run"] == f"random_{args.agent}") & (df["eval_env"] == args.env)],
+                 "fast-trained -> gz": df[(df["eval_env"] == "gz") & df["run"].str.startswith(f"fast_{args.agent}")]
                  if args.env == "fast" else df.iloc[0:0]}
         for name, sub in extra.items():
             if len(sub):

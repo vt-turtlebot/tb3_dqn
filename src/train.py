@@ -3,6 +3,7 @@
     python train.py --agent dqn --env fast --seed 0
     python train.py --agent dqn --env gz   --seed 0     # needs ./start_gz.sh running
     python train.py --agent dqn --env fast --smoke      # ~2k steps, quick end-to-end check
+    python train.py --agent td3 --env fast --seed 0     # continuous actions (actions.mode is set from --agent)
 
 Outputs (results/runs/<env>_<agent>_seed<seed>/):
     train_episodes.csv   one row per finished training episode
@@ -26,7 +27,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from agents import make_agent
+from agents import make_agent, set_action_mode
 from envs import make_env
 from envs.layout import eval_layouts
 from evaluate import run_eval
@@ -53,7 +54,7 @@ def _truncate_csv(path: Path, max_step: int) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--agent", default="dqn", choices=["dqn"])
+    p.add_argument("--agent", default="dqn", choices=["dqn", "td3"])
     p.add_argument("--env", default="fast", choices=["fast", "gz"])
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smoke", action="store_true", help="short run (~2k steps); gz also checks topics")
@@ -67,6 +68,7 @@ def main() -> None:
     args = p.parse_args()
 
     cfg = load_config(args.config, tier=args.env, smoke=args.smoke)
+    set_action_mode(cfg, args.agent)
     apply_overrides(cfg, args.overrides)
     if args.total_steps:
         cfg["run"]["total_steps"] = args.total_steps

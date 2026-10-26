@@ -18,7 +18,8 @@ robot:                        # TurtleBot3 Burger
   max_linear_accel: 1.0       # m/s^2, matches the DiffDrive plugin in the Burger SDF
 
 actions:
-  mode: discrete              # discrete | continuous (continuous reserved for TD3 in phase 2)
+  mode: discrete              # discrete | continuous. train.py / evaluate.py set it from --agent (dqn: discrete,
+                              # td3: continuous = Box([v_min, -w_max], [v_max, w_max]), the full Burger range)
   discrete:
     v: 0.15                   # constant forward speed, m/s
     w: [1.5, 0.75, 0.0, -0.75, -1.5]   # hard left, left, forward, right, hard right (+w = CCW = left)
@@ -81,6 +82,25 @@ dqn:
   eps_start: 1.0
   eps_end: 0.05
   # eps_decay_steps / warmup_steps / total_steps come from `tiers:`
+
+td3:                          # vanilla TD3 (Fujimoto et al. 2018). Untuned: TD3-paper defaults, except the values
+                              # shared with dqn (hidden, gamma, batch, buffer, train_freq), which match it for the comparison
+  hidden: [256, 256]          # actor and each of the two critics
+  actor_lr: 3.0e-4
+  critic_lr: 3.0e-4
+  gamma: 0.99
+  batch_size: 128
+  buffer_size: 100000
+  train_freq: 1               # critic updates per env step
+  tau: 0.005                  # Polyak rate of the target nets (updated with the actor)
+  policy_delay: 2             # actor + target update every 2nd critic update
+  expl_noise: 0.1             # gaussian exploration std, in normalised action units ([-1, 1] per dimension)
+  target_noise: 0.2           # target policy smoothing std (normalised units)
+  target_noise_clip: 0.5
+  loss: mse                   # mse | huber (critic)
+  grad_clip: 0.0              # critic grad-norm clip; 0 = off (vanilla TD3). The pre-clip norm is logged either way
+  reward_scale: 1.0
+  # warmup_steps / total_steps come from `tiers:` (same as dqn); warm-up actions are uniform over the box
 
 eval:
   interval: 5000
