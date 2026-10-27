@@ -495,11 +495,33 @@ tb3_dqn/
     └── utils.py
 ```
 
-### Extending to TD3 (phase 2)
+### Phase 2: continuous actions (TD3)
 
-Set `actions.mode: continuous` (the env already exposes `Box([v_min, −w_max], [v_max, w_max])` and decodes it), add
-`agents/td3.py` implementing `act / observe / update / save / load`, and register it in `agents/__init__.py`. Training,
-evaluation, CSV logging and every plot are agent-independent (`info()` may return no ε; plots then simply omit it).
-Note that `train.py` currently restricts `--agent` to `dqn`, and DQN's replay buffer stores integer actions — the TD3 agent
-brings its own buffer. `train.py` logs whatever `update()` returns (`upd_*` columns), and the Q-overestimation probe in
-`evaluate.py` is used only by agents that expose `q_values` and `gamma`, so a TD3 agent needs no changes there either.
+`python train.py --agent td3 --env fast --seed 0` trains `agents/td3.py`; `AGENT=td3 ./run_final.sh report-fast|report-gz`
+runs the same held-out evaluation as DQN, and `python plot.py --agent td3` writes `results/td3/` (incl.
+`compare_success.png`, `compare_bars.png`) without touching the DQN figures.
+
+* **Action space.** `train.py`/`evaluate.py` switch `actions.mode` to `continuous` for TD3: a 1-D Box, angular velocity `w` in
+  ±1.5 rad/s at the same constant `v` = 0.15 m/s (`actions.continuous`). DQN's five presets lie inside that range, so the
+  comparison isolates discretising steering. Obs, reward, termination and both envs are unchanged. Speed control (2-D action)
+  is not implemented.
+* **Agent.** Standard TD3: twin critics, delayed actor/target updates (every 2), target smoothing (0.2, clip 0.5), polyak 0.005,
+  2x256 MLPs, tanh actor, Gaussian exploration (0.1 x w_max, no epsilon, so the epsilon column is NaN), same warm-up, batch,
+  buffer and grad clip as DQN. The critic uses a Huber loss (non-standard for TD3) for parity with DQN.
+* **Protocol.** 10 seeds x 200k fast-tier steps, the same evals and the same 200 held-out report layouts as DQN.
+  Hyperparameters are untuned first-guess values: nothing was tuned on any layout set.
+
+| 200 report layouts, 10 seeds | success % | collision % | timeout % | mean return |
+|---|---|---|---|---|
+| DQN, fast | 73.7 | 26.3 | 0.0 | 111.7 |
+| TD3, fast | 84.9 | 15.1 | 0.0 | 140.1 |
+| DQN, fast->Gazebo | 72.1 | 27.9 | 0.0 | 107.6 |
+| TD3, fast->Gazebo | 83.1 | 16.9 | 0.0 | 135.6 |
+| random policy (discrete-run baseline) | 4.5 | 95.5 | 0.0 | -106.7 |
+
+On the tuning layouts both agents reach ~73 % at the first eval after warm-up (10k steps); DQN then plateaus (~77-79 % at
+200k) while TD3 keeps improving to ~90 %. TD3's transfer gap (1.8 points) is no larger than DQN's (1.6).
+
+Caveats: TD3 also differs from DQN in its twin critics and noise-based exploration, so the gap is not purely action-space
+discretisation; no TD3 runs were trained in Gazebo (DQN has 3), and TD3's final-step success varies by seed (stability in
+`results/td3/stability.csv`).

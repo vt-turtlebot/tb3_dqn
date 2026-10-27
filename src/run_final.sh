@@ -14,6 +14,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 PY="${PYTHON:-../venv/bin/python}"
 SEEDS="${SEEDS:-0 1 2 3 4 5 6 7 8 9}"
+AGENT="${AGENT:-dqn}"   # AGENT=td3 ./run_final.sh train|report-fast|report-gz (gz-trained runs and random baseline are DQN-only)
 GZ_SIMS="${GZ_SIMS:-5}"
 LOG=../results/logs
 mkdir -p "$LOG" ../results/report
@@ -39,18 +40,20 @@ stop_sim() {   # kill by PID (never pkill -f: the pattern would match this scrip
 case "${1:-}" in
   train)
     for s in $SEEDS; do
-      $PY train.py --agent dqn --env fast --seed "$s" > "$LOG/fast_dqn_seed$s.log" 2>&1 &
+      $PY train.py --agent "$AGENT" --env fast --seed "$s" > "$LOG/fast_${AGENT}_seed$s.log" 2>&1 &
     done
     wait ;;
   report-fast)
-    ckpts=(); for s in $SEEDS; do ckpts+=("../results/runs/fast_dqn_seed$s/final.pt"); done
-    $PY evaluate.py --checkpoint "${ckpts[@]}" --env fast --layouts report --out-dir ../results/report
-    $PY evaluate.py --random --env fast --layouts report --out-dir ../results/report ;;
+    ckpts=(); for s in $SEEDS; do ckpts+=("../results/runs/fast_${AGENT}_seed$s/final.pt"); done
+    $PY evaluate.py --agent "$AGENT" --checkpoint "${ckpts[@]}" --env fast --layouts report --out-dir ../results/report
+    [[ $AGENT == dqn ]] && $PY evaluate.py --random --env fast --layouts report --out-dir ../results/report ;;
   report-gz)
     jobs_=()
-    for s in $SEEDS; do jobs_+=("../results/runs/fast_dqn_seed$s/final.pt"); done
-    for f in ../results/runs/gz_dqn_seed*/final.pt; do [[ -f $f ]] && jobs_+=("$f"); done
-    jobs_+=("random")
+    for s in $SEEDS; do jobs_+=("../results/runs/fast_${AGENT}_seed$s/final.pt"); done
+    if [[ $AGENT == dqn ]]; then
+      for f in ../results/runs/gz_dqn_seed*/final.pt; do [[ -f $f ]] && jobs_+=("$f"); done
+      jobs_+=("random")
+    fi
     for i in $(seq 0 $((GZ_SIMS - 1))); do start_sim "$i"; done
     for i in $(seq 0 $((GZ_SIMS - 1))); do      # job k runs on sim k mod GZ_SIMS, sequentially per sim
       ( ros_env "$i"
@@ -58,7 +61,7 @@ case "${1:-}" in
           (( k % GZ_SIMS == i )) || continue
           j="${jobs_[$k]}"
           if [[ $j == random ]]; then $PY evaluate.py --random --env gz --layouts report --out-dir ../results/report
-          else $PY evaluate.py --checkpoint "$j" --env gz --layouts report --out-dir ../results/report; fi
+          else $PY evaluate.py --agent "$AGENT" --checkpoint "$j" --env gz --layouts report --out-dir ../results/report; fi
         done ) > "$LOG/final_report_gz_$i.log" 2>&1 &
     done
     wait

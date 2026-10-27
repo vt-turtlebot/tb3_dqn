@@ -23,6 +23,10 @@ actions:
     v: 0.15                   # constant forward speed, m/s
     w: [1.5, 0.75, 0.0, -0.75, -1.5]   # hard left, left, forward, right, hard right (+w = CCW = left)
 
+  continuous:                 # used when mode=continuous (TD3): 1-D w in [-w_max, w_max], same constant v
+    v: 0.15
+    w_max: 1.5
+
 lidar:
   n_bins: 24                  # observation bins; each bin = min over a 15 deg sector of the 360-sample scan
   n_samples: 360              # raw scan size (LDS-01); the fast tier emulates it
@@ -81,6 +85,21 @@ dqn:
   eps_start: 1.0
   eps_end: 0.05
   # eps_decay_steps / warmup_steps / total_steps come from `tiers:`
+
+td3:
+  hidden: [256, 256]
+  lr_actor: 3.0e-4
+  lr_critic: 5.0e-4
+  gamma: 0.99
+  tau: 0.005                  # polyak averaging of the target nets
+  batch_size: 128
+  buffer_size: 100000
+  policy_delay: 2             # actor + target update every N critic updates
+  policy_noise: 0.2           # target smoothing noise std, as a fraction of w_max
+  noise_clip: 0.5             # clip of the smoothing noise, fraction of w_max
+  expl_noise: 0.1             # gaussian exploration std, fraction of w_max (no epsilon)
+  grad_clip: 10.0
+  # warmup_steps / total_steps come from `tiers:`
 
 eval:
   interval: 5000

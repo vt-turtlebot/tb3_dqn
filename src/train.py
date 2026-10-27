@@ -53,7 +53,7 @@ def _truncate_csv(path: Path, max_step: int) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--agent", default="dqn", choices=["dqn"])
+    p.add_argument("--agent", default="dqn", choices=["dqn", "td3"])
     p.add_argument("--env", default="fast", choices=["fast", "gz"])
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smoke", action="store_true", help="short run (~2k steps); gz also checks topics")
@@ -68,6 +68,8 @@ def main() -> None:
 
     cfg = load_config(args.config, tier=args.env, smoke=args.smoke)
     apply_overrides(cfg, args.overrides)
+    if args.agent == "td3":
+        cfg["actions"]["mode"] = "continuous"
     if args.total_steps:
         cfg["run"]["total_steps"] = args.total_steps
     torch.set_num_threads(int(cfg["experiment"]["torch_threads"]))

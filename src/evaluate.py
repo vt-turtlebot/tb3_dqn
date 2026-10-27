@@ -117,6 +117,8 @@ def main() -> None:
 
     cfg = load_config(args.config, tier=args.env)
     apply_overrides(cfg, args.overrides)
+    if args.agent == "td3":
+        cfg["actions"]["mode"] = "continuous"
     torch.set_num_threads(int(cfg["experiment"]["torch_threads"]))
     n_eps = args.episodes or cfg["eval"]["episodes" if args.layouts == "tuning" else "report_episodes"]
     layouts = eval_layouts(cfg, args.layouts)

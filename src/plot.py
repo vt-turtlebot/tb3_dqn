@@ -68,6 +68,10 @@ def random_baseline(res: Path, env: str) -> float | None:
     return float(row["success_rate"].iloc[0]) * 100 if len(row) else None
 
 
+def _agent_of(runs: dict) -> str:
+    return next(iter(runs)).split("_")[1].upper()   # run dir is <env>_<agent>_seed<N>
+
+
 def fig_success(runs: dict, env: str, x: str, out: Path, baseline: float | None, suffix: str) -> None:
     fig, ax = plt.subplots(figsize=(7.5, 4.6))
     evs = [r["eval"] for r in runs.values()]
@@ -83,7 +87,7 @@ def fig_success(runs: dict, env: str, x: str, out: Path, baseline: float | None,
     for y in Y:
         ax.plot(grid, y, color=C["mean"], alpha=0.18, lw=0.9)
     m, h = Y.mean(0), ci95(Y)
-    ax.plot(grid, m, color=C["mean"], lw=2.2, label=f"DQN mean over {len(evs)} seeds")
+    ax.plot(grid, m, color=C["mean"], lw=2.2, label=f"{_agent_of(runs)} mean over {len(evs)} seeds")
     ax.fill_between(grid, np.clip(m - h, 0, 100), np.clip(m + h, 0, 100), color=C["mean"], alpha=0.25, label="95% CI")
     if baseline is not None:
         ax.axhline(baseline, color=C["random"], ls="--", lw=1.3, label=f"random policy ({baseline:.0f}%, held-out layouts)")
@@ -128,7 +132,7 @@ def fig_bars(runs: dict, env: str, res: Path, out: Path, suffix: str, agent: str
     summ = res / "transfer" / "summary.csv"
     if env == "fast" and summ.exists():
         df = pd.read_csv(summ)
-        t = df[(df["eval_env"] == "gz") & df["run"].str.startswith("fast_dqn")]
+        t = df[(df["eval_env"] == "gz") & df["run"].str.startswith(f"fast_{agent}")]
         if len(t):
             series.append(("fast-trained, evaluated in Gazebo", t[[c[0] for c in cats]].to_numpy() * 100))
     _bars(series, cats, out / f"success_vs_collisions_bar{suffix}.png",
@@ -258,12 +262,15 @@ def fig_return(runs: dict, env: str, out: Path, bin_w: int, suffix: str) -> None
     ax.plot(grid, np.mean([e.loc[grid].to_numpy() for e in ev], axis=0), color="black", ls=":", lw=1.6,
             label="greedy eval return (mean)")
     ax.set(xlabel="Training steps (env steps)", ylabel="Mean episode return",
-           title=f"Training return and exploration schedule ({env} tier)")
+           title=f"Training return and exploration schedule ({env} tier, {_agent_of(runs)})")
     ax.grid(alpha=0.3)
     ax2 = ax.twinx()
     eps = pd.concat([r["eval"].set_index("step")["epsilon"] for r in runs.values()], axis=1).mean(axis=1)
-    ax2.plot(eps.index, eps.values, color=C["eps"], lw=1.6, ls="--", label="epsilon")
-    ax2.set(ylabel="epsilon", ylim=(0, 1.05))
+    if eps.notna().any():    # TD3 has no epsilon (gaussian exploration noise)
+        ax2.plot(eps.index, eps.values, color=C["eps"], lw=1.6, ls="--", label="epsilon")
+        ax2.set(ylabel="epsilon", ylim=(0, 1.05))
+    else:
+        ax2.set_yticks([])
     l1, n1 = ax.get_legend_handles_labels()
     l2, n2 = ax2.get_legend_handles_labels()
     ax.legend(l1 + l2, n1 + n2, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, frameon=False)
@@ -272,7 +279,7 @@ def fig_return(runs: dict, env: str, out: Path, bin_w: int, suffix: str) -> None
     plt.close(fig)
 
 
-def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix: str) -> None:
+def fig_traj(env: str, agent: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix: str) -> None:
     layout = eval_layouts(cfg)[layout_idx]
     half, oc = cfg["arena"]["size"] / 2.0, cfg["obstacles"]
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -286,11 +293,11 @@ def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix:
                                    transform=matplotlib.transforms.Affine2D().rotate(o.yaw).translate(o.x, o.y) + ax.transData))
     ax.add_patch(Circle(layout.goal, cfg["task"]["goal_radius"], fc="#2ca02c", alpha=0.5, ec="g", label="goal"))
     ax.plot(*layout.start[:2], "ks", label="start")
-    sources = [(env, C[env], "-", sorted(glob.glob(str(res / "runs" / f"{env}_dqn_seed*" / "final_eval_traj.npz"))))]
+    sources = [(env, C[env], "-", sorted(glob.glob(str(res / "runs" / f"{env}_{agent}_seed*" / "final_eval_traj.npz"))))]
     if env == "fast":
         # fast-trained policies in the final Gazebo tier, same tuning layouts (transfer-gap recordings, §6)
         sources.append(("gz (transfer)", C["gz"], "--",
-                        sorted(glob.glob(str(res / "transfer_diag" / "gz_gt" / "fast_dqn_seed*__on_gz_traj.npz")))))
+                        sorted(glob.glob(str(res / "transfer_diag" / "gz_gt" / f"fast_{agent}_seed*__on_gz_traj.npz")))))
     drawn = False
     for name, colour, ls, files in sources:
         for k, f in enumerate(files):
@@ -310,6 +317,35 @@ def fig_traj(env: str, res: Path, out: Path, layout_idx: int, cfg: dict, suffix:
     plt.close(fig)
 
 
+def fig_compare(res: Path, env: str, agent: str, out: Path, suffix: str) -> None:
+    """DQN (discrete) vs `agent` (continuous): success over training and final outcome bars."""
+    series = {}
+    cols = ["success_rate", "collision_rate", "timeout_rate"]
+    for a in ("dqn", agent):
+        runs = load_runs(res, env, a)
+        rep = report_rows(res, env, a, env, runs)
+        series[a] = (runs, (rep if rep is not None else final_rows(runs))[cols].to_numpy() * 100)
+    fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    for (a, (runs, _)), col in zip(series.items(), (C["mean"], C["collision"])):
+        evs = [r["eval"].set_index("step")["success_rate"] * 100 for r in runs.values()]
+        grid = sorted(set.intersection(*[set(e.index) for e in evs]))
+        Y = np.stack([e.loc[grid].to_numpy() for e in evs])
+        m, h = Y.mean(0), ci95(Y)
+        ax.plot(grid, m, color=col, lw=2.2, label=f"{a.upper()} ({len(evs)} seeds)")
+        ax.fill_between(grid, np.clip(m - h, 0, 100), np.clip(m + h, 0, 100), color=col, alpha=0.2)
+    ax.set(xlabel="Training steps (env steps)", ylabel="Goal success rate (%)", ylim=(0, 100),
+           title=f"Discrete DQN vs continuous {agent.upper()} ({env} tier, mean, 95% CI)")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out / f"compare_success{suffix}.png", dpi=150)
+    plt.close(fig)
+    cats = [("success_rate", "Goal reached", C["goal"]), ("collision_rate", "Collision", C["collision"]),
+            ("timeout_rate", "Timeout", C["timeout"])]
+    _bars([(a.upper(), v) for a, (_, v) in series.items()], cats, out / f"compare_bars{suffix}.png",
+          "Final outcomes: discrete vs continuous (mean over seeds, 95% CI)")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--env", default="fast", choices=["fast", "gz"])
@@ -323,18 +359,23 @@ def main() -> None:
     res = results_dir(cfg)
     suffix = "" if args.env == "fast" else f"_{args.env}"
     runs = load_runs(res, args.env, args.agent)
-    base = random_baseline(res, args.env)
+    base = random_baseline(res, args.env)   # uniform-random w policy (random_dqn row; same w range for TD3)
+    out = res if args.agent == "dqn" else res / args.agent   # never overwrite the DQN figures
+    out.mkdir(exist_ok=True)
 
-    fig_success(runs, args.env, "step", res, base, suffix)
-    fig_success(runs, args.env, "episodes", res, base, suffix)
-    fig_bars(runs, args.env, res, res, suffix, args.agent)
-    fig_return(runs, args.env, res, args.return_bin, suffix)
-    fig_traj(args.env, res, res, args.layout, cfg, suffix)
+    fig_success(runs, args.env, "step", out, base, suffix)
+    fig_success(runs, args.env, "episodes", out, base, suffix)
+    fig_bars(runs, args.env, res, out, suffix, args.agent)
+    fig_return(runs, args.env, out, args.return_bin, suffix)
+    fig_traj(args.env, args.agent, res, out, args.layout, cfg, suffix)
     warmup = int(cfg["run"]["warmup_steps"])
-    fig_success_per_seed(runs, args.env, res, suffix, warmup)
-    fig_q_stability(runs, args.env, res, suffix)
+    fig_success_per_seed(runs, args.env, out, suffix, warmup)
+    if args.agent == "dqn":
+        fig_q_stability(runs, args.env, out, suffix)
     stab = stability_table(runs, warmup)
-    stab.to_csv(res / f"stability{suffix}.csv", index=False)
+    stab.to_csv(out / f"stability{suffix}.csv", index=False)
+    if args.agent != "dqn":
+        fig_compare(res, args.env, args.agent, out, suffix)
 
     keys = ["success_rate", "collision_rate", "timeout_rate", "mean_return"]
     rep = report_rows(res, args.env, args.agent, args.env, runs)
@@ -350,11 +391,11 @@ def main() -> None:
         for name, sub in {"random policy": df[(df["run"] == "random_dqn") & (df["eval_env"] == args.env)]}.items():
             if len(sub):
                 rows.append({"label": f"{name} (report)", **sub[keys].mean().to_dict()})
-        pd.DataFrame(rows).to_csv(res / f"summary{suffix}.csv", index=False)
+        pd.DataFrame(rows).to_csv(out / f"summary{suffix}.csv", index=False)
         print(f"seeds: {sorted(runs)}")
         print("\n" + format_summary_table(rows))
         print("\nstability (periodic evals on tuning layouts):\n" + stab.drop(columns=["dip_steps"]).to_string(index=False))
-        print(f"\nplots written to {res}")
+        print(f"\nplots written to {out}")
         return
 
     fin = final_rows(runs)
@@ -363,16 +404,16 @@ def main() -> None:
     if summ.exists():
         df = pd.read_csv(summ)
         extra = {"random policy": df[(df["run"] == "random_dqn") & (df["eval_env"] == args.env)],
-                 "fast-trained -> gz": df[(df["eval_env"] == "gz") & df["run"].str.startswith("fast_dqn")]
+                 "fast-trained -> gz": df[(df["eval_env"] == "gz") & df["run"].str.startswith(f"fast_{args.agent}")]
                  if args.env == "fast" else df.iloc[0:0]}
         for name, sub in extra.items():
             if len(sub):
                 rows.append({"label": f"{name} (n={len(sub)})",
                              **sub[["success_rate", "collision_rate", "timeout_rate", "mean_return"]].mean().to_dict()})
-    pd.DataFrame(rows).to_csv(res / f"summary{suffix}.csv", index=False)
+    pd.DataFrame(rows).to_csv(out / f"summary{suffix}.csv", index=False)
     print(f"seeds: {sorted(runs)}")
     print("\n" + format_summary_table(rows))
-    print(f"\nplots written to {res}")
+    print(f"\nplots written to {out}")
 
 
 if __name__ == "__main__":

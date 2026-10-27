@@ -38,11 +38,13 @@ class QNetwork(nn.Module):
 class ReplayBuffer:
     """Uniform replay stored in preallocated float32 arrays (fast, and trivially checkpointable)."""
 
-    def __init__(self, capacity: int, obs_dim: int) -> None:
+    def __init__(self, capacity: int, obs_dim: int, act_dim: int = 0) -> None:
+        """act_dim=0 -> scalar int actions (DQN); act_dim>0 -> float action vectors (TD3)."""
         self.capacity, self.size, self.pos = capacity, 0, 0
         self.obs = np.zeros((capacity, obs_dim), dtype=np.float32)
         self.next_obs = np.zeros((capacity, obs_dim), dtype=np.float32)
-        self.act = np.zeros(capacity, dtype=np.int64)
+        self.act = np.zeros(capacity if act_dim == 0 else (capacity, act_dim),
+                            dtype=np.int64 if act_dim == 0 else np.float32)
         self.rew = np.zeros(capacity, dtype=np.float32)
         self.done = np.zeros(capacity, dtype=np.float32)
 

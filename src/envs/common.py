@@ -79,10 +79,11 @@ class TB3BaseEnv(gym.Env):
             assert 0.0 <= self._v_const <= self.rc["v_max"], "discrete v exceeds Burger limits"
             assert np.all(np.abs(self._w_table) <= self.rc["w_max"]), "discrete w exceeds Burger limits"
             self.action_space = spaces.Discrete(len(self._w_table))
-        else:  # continuous interface reserved for the phase-2 TD3 agent
-            self.action_space = spaces.Box(
-                low=np.array([self.rc["v_min"], -self.rc["w_max"]], dtype=np.float32),
-                high=np.array([self.rc["v_max"], self.rc["w_max"]], dtype=np.float32))
+        else:  # continuous: 1-D angular velocity, same constant v and w range as the discrete set
+            self._v_const = float(ac["continuous"]["v"])
+            w_lim = float(ac["continuous"]["w_max"])
+            assert 0.0 <= self._v_const <= self.rc["v_max"] and w_lim <= self.rc["w_max"], "continuous action exceeds Burger limits"
+            self.action_space = spaces.Box(low=-w_lim, high=w_lim, shape=(1,), dtype=np.float32)
 
         obs_dim = self.n_bins + 4
         low = np.concatenate([np.zeros(self.n_bins), [0.0, -np.pi, 0.0, -1.0]]).astype(np.float32)
@@ -110,10 +111,8 @@ class TB3BaseEnv(gym.Env):
     def _decode_action(self, action: Any) -> tuple[float, float]:
         if self.action_mode == "discrete":
             return self._v_const, float(self._w_table[int(action)])
-        a = np.asarray(action, dtype=np.float64).reshape(2)
-        v = float(np.clip(a[0], self.rc["v_min"], self.rc["v_max"]))
-        w = float(np.clip(a[1], -self.rc["w_max"], self.rc["w_max"]))
-        return v, w
+        w_lim = float(self.action_space.high[0])
+        return self._v_const, float(np.clip(np.asarray(action, dtype=np.float64).reshape(1)[0], -w_lim, w_lim))
 
     def _goal_geometry(self, pose: np.ndarray) -> tuple[float, float]:
         dx, dy = self._goal[0] - pose[0], self._goal[1] - pose[1]
